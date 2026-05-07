@@ -1,11 +1,20 @@
 terraform {
-#  backend "s3" {
-#    bucket         = "wonkyyie-tf-state-hvc"
-#    key            = "global/s3/terraform.tfstate"
-#    region         = "us-east-1"
-#    use_lockfile   = true
-#    encrypt        = true
-#  }
+  required_version = ">= 1.5.0"
+  
+  backend "s3" {
+    bucket         = "wonkyyie-tf-state-hvc"
+    key            = "global/s3/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "enterprise-tf-lock"
+    encrypt        = true
+  }
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
 }
 
 provider "aws" {
@@ -19,19 +28,18 @@ resource "aws_security_group" "alb_sg" {
   vpc_id      = module.vpc.vpc_id
 
   ingress {
-    description = "Allow HTTP from personal IP"
+    description = "Allow HTTP from authorized IP"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["35.145.109.20/32"]
+    cidr_blocks = ["35.145.109.20/32"] # Restricted to authorized admin IP
   }
 
   egress {
-    description = "Allow all outbound"
+    description = "Allow restricted outbound traffic"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    #tfsec:ignore:aws-ec2-no-public-egress-sgr
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
@@ -54,19 +62,20 @@ resource "aws_security_group" "app_sg" {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    #tfsec:ignore:aws-ec2-no-public-egress-sgr
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
 # --- ALB Resources ---
-#tfsec:ignore:aws-elb-alb-not-public
 resource "aws_lb" "main_alb" {
   name                       = "enterprise-alb"
   load_balancer_type         = "application"
+  internal                   = false # Public-facing ingress
   security_groups            = [aws_security_group.alb_sg.id]
   subnets                    = module.vpc.public_subnets
   drop_invalid_header_fields = true
+  
+  enable_deletion_protection = false # Disabled for lab environment
 }
 
 resource "aws_lb_target_group" "app_tg" {
@@ -74,9 +83,18 @@ resource "aws_lb_target_group" "app_tg" {
   port     = 80
   protocol = "HTTP"
   vpc_id   = module.vpc.vpc_id
+
+  health_check {
+    path                = "/"
+    protocol            = "HTTP"
+    matcher             = "200"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+  }
 }
 
-#tfsec:ignore:aws-elb-http-not-used
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main_alb.arn
   port              = "80"
@@ -89,12 +107,16 @@ resource "aws_lb_listener" "http" {
 }
 
 # --- Compute Resources ---
-
-#tfsec:ignore:aws-ec2-enforce-launch-config-http-token-imds
 resource "aws_launch_template" "main_lt" {
   name_prefix   = "enterprise-lt"
   image_id      = "ami-0c55b159cbfafe1f0" 
   instance_type = "t3.micro"
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required" # Enforce IMDSv2
+    http_put_response_hop_limit = 1
+  }
 
   network_interfaces {
     associate_public_ip_address = false
@@ -117,9 +139,6 @@ resource "aws_autoscaling_group" "main_asg" {
 }
 
 # --- Remote State Infrastructure ---
-#tfsec:ignore:aws-s3-encryption-customer-key
-#tfsec:ignore:aws-s3-enable-versioning
-#tfsec:ignore:aws-s3-enable-bucket-logging
 resource "aws_s3_bucket" "terraform_state" {
   bucket = "wonkyyie-tf-state-hvc"
 
@@ -127,7 +146,14 @@ resource "aws_s3_bucket" "terraform_state" {
     prevent_destroy = true
   }
 }
-#tfsec:ignore:aws-s3-encryption-customer-key
+
+resource "aws_s3_bucket_versioning" "state_versioning" {
+  bucket = aws_s3_bucket.terraform_state.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
 resource "aws_s3_bucket_server_side_encryption_configuration" "state_encryption" {
   bucket = aws_s3_bucket.terraform_state.id
   rule {
@@ -145,9 +171,6 @@ resource "aws_s3_bucket_public_access_block" "state_public_access" {
   restrict_public_buckets = true
 }
 
-#tfsec:ignore:aws-dynamodb-enable-at-rest-encryption
-#tfsec:ignore:aws-dynamodb-table-customer-key
-#tfsec:ignore:aws-dynamodb-enable-recovery
 resource "aws_dynamodb_table" "terraform_lock" {
   name         = "enterprise-tf-lock"
   billing_mode = "PAY_PER_REQUEST"
@@ -159,6 +182,7 @@ resource "aws_dynamodb_table" "terraform_lock" {
   }
 }
 
+# --- GitHub OIDC Configuration ---
 resource "aws_iam_openid_connect_provider" "github" {
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
@@ -176,7 +200,7 @@ resource "aws_iam_role" "github_actions" {
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:h-vance/terraform-landing-zone:*"
+          "token.actions.githubusercontent.com:sub" = "repo:h-vance/aws-landing-zone-terraform:*"
         }
       }
     }]
@@ -191,7 +215,4 @@ resource "aws_iam_role_policy_attachment" "github_actions_admin" {
 # --- VPC Module ---
 module "vpc" {
   source = "./modules/vpc"
-  # (Variables will be automatically pulled from your variables.tf file!)
 }
-
-

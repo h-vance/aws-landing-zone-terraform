@@ -1,17 +1,32 @@
-# AWS Landing Zone (Terraform)
+# AWS Landing Zone (Terraform Reference Architecture)
 
-Enterprise-grade multi-account AWS Landing Zone architecture implemented with modular HCL and automated security governance.
+**Enterprise-grade multi-account governance and foundation implemented with modular HCL.**
 
-## Overview
-This repository contains the infrastructure code for a production-ready AWS Landing Zone. It follows AWS best practices for account separation, identity management, and centralized logging.
+This repository implements a production-ready AWS Landing Zone foundation. It moves beyond basic resource provisioning to demonstrate **Professional Infrastructure-as-Code (IaC)** standards, including remote state management, automated validation, and security hardening.
+
+## ✦ Professional Foundation
+- **Remote State Management:** Integrated S3 backend with DynamoDB state locking to prevent concurrency issues and configuration drift.
+- **Automated CI/CD:** GitHub Actions pipeline for automated `terraform validate`, `fmt`, and `tflint` checks on every PR.
+- **Security Hardened:** 
+    - **IMDSv2 Enforced:** All compute resources require session tokens (protection against SSRF).
+    - **S3 Versioning:** State buckets are versioned for disaster recovery.
+    - **Restricted Access:** Security groups follow a "Strict Ingress" policy, limiting administrative access to authorized IPs.
 
 ## Key Features
-- **Multi-Account Orchestration**: Automated account provisioning and organizational unit (OU) management.
-- **Identity & Access**: Least-privilege IAM roles and SSO integration.
-- **Security & Compliance**: Centralized CloudTrail logging and automated AWS Config rule deployment.
-- **Networking**: Hub-and-spoke VPC topology with Transit Gateway integration.
+- **Modular VPC Architecture**: Hub-and-spoke ready VPC with separated public and private subnets.
+- **Load Balanced Ingress**: High-availability Application Load Balancer (ALB) with automated health checks.
+- **Auto-Scaling Compute**: Dynamic scaling groups (ASG) ensuring service durability across multiple availability zones.
+- **GitHub OIDC Integration**: Zero-credential AWS authentication for CI/CD runners using OpenID Connect.
 
-## Technical Stack
-- **IaC**: Terraform 1.5+
-- **Governance**: AWS Organizations, Control Tower
-- **Security**: GuardDuty, Security Hub, IAM Access Analyzer
+## Repository Structure
+- **`modules/vpc/`**: Reusable network isolation component.
+- **`main.tf`**: Primary orchestration for compute, storage, and security.
+- **`.github/workflows/`**: Automated quality assurance pipelines.
+
+## Getting Started
+1. **Initialize Backend:** Run `terraform init` (ensure your AWS credentials have access to the state bucket).
+2. **Validate:** `terraform validate` to ensure structural integrity.
+3. **Plan:** `terraform plan -out=landing-zone.plan` to review architectural changes.
+
+---
+Operations & Reliability Engineered (c) 2026 Harrison Vance.
