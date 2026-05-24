@@ -2,6 +2,8 @@
 
 **Enterprise-grade multi-account governance and foundation implemented with modular HCL.**
 
+[![Terraform](https://img.shields.io/badge/Terraform-844FBA?style=for-the-badge&logo=Terraform&logoColor=FFFFFF)](https://terraform.io)&nbsp;[![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-2088FF?style=for-the-badge&logo=GitHub+Actions&logoColor=FFFFFF)](https://github.com/features/actions)
+
 This repository implements a production-ready AWS Landing Zone foundation. It moves beyond basic resource provisioning to demonstrate **Professional Infrastructure-as-Code (IaC)** standards, including remote state management, automated validation, and security hardening.
 
 ## ✦ Professional Foundation
