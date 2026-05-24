@@ -9,10 +9,10 @@ This repository implements a production-ready AWS Landing Zone foundation. It mo
 ## ✦ Professional Foundation
 - **Remote State Management:** Integrated S3 backend with DynamoDB state locking to prevent concurrency issues and configuration drift.
 - **Automated CI/CD:** GitHub Actions pipeline for automated `terraform validate`, `fmt`, and `tflint` checks on every PR.
-- **Security Hardened:** 
-    - **IMDSv2 Enforced:** All compute resources require session tokens (protection against SSRF).
-    - **S3 Versioning:** State buckets are versioned for disaster recovery.
-    - **Restricted Access:** Security groups follow a "Strict Ingress" policy, limiting administrative access to authorized IPs.
+- **Security Hardened:**
+  - **IMDSv2 Enforced:** All compute resources require session tokens (protection against SSRF).
+  - **S3 Versioning:** State buckets are versioned for disaster recovery.
+  - **Restricted Access:** Security groups follow a "Strict Ingress" policy, limiting administrative access to authorized IPs.
 
 ## Key Features
 - **Modular VPC Architecture**: Hub-and-spoke ready VPC with separated public and private subnets.
