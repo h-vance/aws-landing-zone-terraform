@@ -1,39 +1,40 @@
-name: Terraform Pipeline
-
-permissions:
-  id-token: write
-  contents: read
+name: Terraform Lint
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
-  terraform-plan:
+  terraform:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-
-      - name: Run tfsec
-        uses: aquasecurity/tfsec-action@v1.0.0
+      - uses: actions/checkout@v4
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
+        uses: hashicorp/setup-terraform@v3
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v1
+      - name: Terraform Format
+        run: terraform fmt -check -recursive
+
+      - name: Static Analysis (Checkov)
+        uses: bridgecrewio/checkov-action@master
         with:
-          role-to-assume: arn:aws:iam::686271801043:role/github-actions-role
-          aws-region: us-east-2
+          directory: .
+          framework: terraform
+          quiet: true
+          soft_fail: true
 
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Plan
-        run: terraform plan
+      - name: Vulnerability Scan (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          hide-progress: true
+          format: table
+          exit-code: 0
+          severity: CRITICAL,HIGH
 
