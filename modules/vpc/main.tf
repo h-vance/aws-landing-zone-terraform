@@ -16,18 +16,18 @@ resource "aws_internet_gateway" "main_igw" {
 }
 
 resource "aws_subnet" "public_1" {
-  vpc_id                  = aws_vpc.main_vpc.id
-  cidr_block              = var.public_subnet_1_cidr
-  availability_zone       = "us-east-2a"
-#tfsec:ignore:aws-ec2-no-public-ip-subnet
+  vpc_id            = aws_vpc.main_vpc.id
+  cidr_block        = var.public_subnet_1_cidr
+  availability_zone = "us-east-2a"
+  #tfsec:ignore:aws-ec2-no-public-ip-subnet
   map_public_ip_on_launch = true
 }
 
 resource "aws_subnet" "public_2" {
-  vpc_id                  = aws_vpc.main_vpc.id
-  cidr_block              = var.public_subnet_2_cidr
-  availability_zone       = "us-east-2b"
-#tfsec:ignore:aws-ec2-no-public-ip-subnet
+  vpc_id            = aws_vpc.main_vpc.id
+  cidr_block        = var.public_subnet_2_cidr
+  availability_zone = "us-east-2b"
+  #tfsec:ignore:aws-ec2-no-public-ip-subnet
   map_public_ip_on_launch = true
 }
 

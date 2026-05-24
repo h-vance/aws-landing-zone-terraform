@@ -1,6 +1,6 @@
 terraform {
   required_version = ">= 1.5.0"
-  
+
   backend "s3" {
     bucket         = "wonkyyie-tf-state-hvc"
     key            = "global/s3/terraform.tfstate"
@@ -74,7 +74,7 @@ resource "aws_lb" "main_alb" {
   security_groups            = [aws_security_group.alb_sg.id]
   subnets                    = module.vpc.public_subnets
   drop_invalid_header_fields = true
-  
+
   enable_deletion_protection = false # Disabled for lab environment
 }
 
@@ -109,7 +109,7 @@ resource "aws_lb_listener" "http" {
 # --- Compute Resources ---
 resource "aws_launch_template" "main_lt" {
   name_prefix   = "enterprise-lt"
-  image_id      = "ami-0c55b159cbfafe1f0" 
+  image_id      = "ami-0c55b159cbfafe1f0"
   instance_type = "t3.micro"
 
   metadata_options {
@@ -190,14 +190,14 @@ resource "aws_iam_openid_connect_provider" "github" {
 }
 
 resource "aws_iam_role" "github_actions" {
-  name               = "github-actions-role"
+  name = "github-actions-role"
   assume_role_policy = jsonencode({
     Statement = [{
-      Effect    = "Allow"
+      Effect = "Allow"
       Principal = {
         Federated = aws_iam_openid_connect_provider.github.arn
       }
-      Action    = "sts:AssumeRoleWithWebIdentity"
+      Action = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringLike = {
           "token.actions.githubusercontent.com:sub" = "repo:h-vance/aws-landing-zone-terraform:*"
