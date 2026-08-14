@@ -12,135 +12,137 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 }
 
+# --- Providers ---
+#
+# The default provider is the management account, which owns the organization.
+#
+# The aliased providers assume OrganizationAccountAccessRole, the role AWS
+# creates automatically in every account made by Organizations. This is how one
+# Terraform run reaches into member accounts without long-lived credentials in
+# each one.
+#
+# Note the two-phase bootstrap below: provider configuration cannot depend on
+# values that are unknown until apply, so member account IDs must be supplied
+# as variables rather than read from module.organization outputs.
+
 provider "aws" {
-  region = "us-east-2"
-}
-
-# --- Security Groups ---
-resource "aws_security_group" "alb_sg" {
-  name        = "alb-sg"
-  description = "Allow HTTP inbound"
-  vpc_id      = module.vpc.vpc_id
-
-  ingress {
-    description = "Allow HTTP from authorized IP"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["35.145.109.20/32"] # Restricted to authorized admin IP
-  }
-
-  egress {
-    description = "Allow restricted outbound traffic"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+  region = var.home_region
+  default_tags {
+    tags = local.common_tags
   }
 }
 
-resource "aws_security_group" "app_sg" {
-  name        = "app-sg"
-  description = "Allow inbound from ALB"
-  vpc_id      = module.vpc.vpc_id
+provider "aws" {
+  alias  = "log_archive"
+  region = var.home_region
 
-  ingress {
-    description     = "Allow HTTP from ALB"
-    from_port       = 80
-    to_port         = 80
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb_sg.id]
+  assume_role {
+    role_arn = "arn:aws:iam::${var.log_archive_account_id}:role/OrganizationAccountAccessRole"
   }
 
-  egress {
-    description = "Allow all outbound"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+  default_tags {
+    tags = local.common_tags
   }
 }
 
-# --- ALB Resources ---
-resource "aws_lb" "main_alb" {
-  name                       = "enterprise-alb"
-  load_balancer_type         = "application"
-  internal                   = false # Public-facing ingress
-  security_groups            = [aws_security_group.alb_sg.id]
-  subnets                    = module.vpc.public_subnets
-  drop_invalid_header_fields = true
+provider "aws" {
+  alias  = "workload"
+  region = var.home_region
 
-  enable_deletion_protection = false # Disabled for lab environment
-}
+  assume_role {
+    role_arn = "arn:aws:iam::${var.workload_account_id}:role/OrganizationAccountAccessRole"
+  }
 
-resource "aws_lb_target_group" "app_tg" {
-  name     = "app-tg"
-  port     = 80
-  protocol = "HTTP"
-  vpc_id   = module.vpc.vpc_id
-
-  health_check {
-    path                = "/"
-    protocol            = "HTTP"
-    matcher             = "200"
-    interval            = 30
-    timeout             = 5
-    healthy_threshold   = 2
-    unhealthy_threshold = 2
+  default_tags {
+    tags = local.common_tags
   }
 }
 
-resource "aws_lb_listener" "http" {
-  load_balancer_arn = aws_lb.main_alb.arn
-  port              = "80"
-  protocol          = "HTTP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.app_tg.arn
+locals {
+  common_tags = {
+    ManagedBy = "terraform"
+    Repo      = "aws-landing-zone-terraform"
   }
+
+  # Phase 2 resources only materialize once the member account IDs are known.
+  # See README, "Two-phase bootstrap".
+  bootstrapped = var.log_archive_account_id != "" && var.workload_account_id != ""
 }
 
-# --- Compute Resources ---
-resource "aws_launch_template" "main_lt" {
-  name_prefix   = "enterprise-lt"
-  image_id      = "ami-0c55b159cbfafe1f0"
-  instance_type = "t3.micro"
+# --- Phase 1: the organization ---
 
-  metadata_options {
-    http_endpoint               = "enabled"
-    http_tokens                 = "required" # Enforce IMDSv2
-    http_put_response_hop_limit = 1
-  }
+module "organization" {
+  source = "./modules/organization"
 
-  network_interfaces {
-    associate_public_ip_address = false
-    security_groups             = [aws_security_group.app_sg.id]
-  }
+  log_archive_account_email = var.log_archive_account_email
+  workload_account_email    = var.workload_account_email
+
+  tags = local.common_tags
 }
 
-resource "aws_autoscaling_group" "main_asg" {
-  name                = "enterprise-asg"
-  vpc_zone_identifier = module.vpc.private_subnets
-  target_group_arns   = [aws_lb_target_group.app_tg.arn]
-  min_size            = 2
-  max_size            = 4
-  desired_capacity    = 2
+# --- Phase 2: guardrails, logging, and the workload baseline ---
 
-  launch_template {
-    id      = aws_launch_template.main_lt.id
-    version = "$Latest"
+module "scp" {
+  source = "./modules/scp"
+
+  target_ou_ids = {
+    security  = module.organization.security_ou_id
+    workloads = module.organization.workloads_ou_id
+    sandbox   = module.organization.sandbox_ou_id
   }
+
+  compute_ou_ids = {
+    workloads = module.organization.workloads_ou_id
+    sandbox   = module.organization.sandbox_ou_id
+  }
+
+  log_archive_bucket_name = var.log_archive_bucket_name
+  allowed_regions         = var.allowed_regions
+  tags                    = local.common_tags
 }
 
-# --- Remote State Infrastructure ---
+module "log_archive" {
+  source = "./modules/log-archive"
+  count  = local.bootstrapped ? 1 : 0
+
+  providers = {
+    aws             = aws
+    aws.log_archive = aws.log_archive
+  }
+
+  bucket_name           = var.log_archive_bucket_name
+  organization_id       = module.organization.organization_id
+  management_account_id = module.organization.management_account_id
+  region                = var.home_region
+  log_retention_days    = var.log_retention_days
+  tags                  = local.common_tags
+}
+
+module "workload_baseline" {
+  source = "./modules/account-baseline"
+  count  = local.bootstrapped ? 1 : 0
+
+  providers = {
+    aws = aws.workload
+  }
+
+  admin_cidr           = var.admin_cidr
+  instance_type        = var.workload_instance_type
+  asg_min_size         = var.workload_asg_min_size
+  asg_max_size         = var.workload_asg_max_size
+  asg_desired_capacity = var.workload_asg_desired_capacity
+  tags                 = local.common_tags
+}
+
+# --- Management account: remote state and CI access ---
+
 resource "aws_s3_bucket" "terraform_state" {
-  bucket = "wonkyyie-tf-state-hvc"
+  bucket = var.state_bucket_name
 
   lifecycle {
     prevent_destroy = true
@@ -172,7 +174,7 @@ resource "aws_s3_bucket_public_access_block" "state_public_access" {
 }
 
 resource "aws_dynamodb_table" "terraform_lock" {
-  name         = "enterprise-tf-lock"
+  name         = var.state_lock_table_name
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "LockID"
 
@@ -183,36 +185,51 @@ resource "aws_dynamodb_table" "terraform_lock" {
 }
 
 # --- GitHub OIDC Configuration ---
+
 resource "aws_iam_openid_connect_provider" "github" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
+  # GitHub's OIDC endpoint uses a publicly trusted CA, so IAM no longer
+  # verifies this thumbprint. It is retained because the argument is required.
   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 }
 
+data "aws_iam_policy_document" "github_actions_assume" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    # Scoped to this repository's branches rather than repo:owner/name:* , so a
+    # pull request from a fork cannot assume the role.
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:h-vance/aws-landing-zone-terraform:ref:refs/heads/*"]
+    }
+  }
+}
+
 resource "aws_iam_role" "github_actions" {
-  name = "github-actions-role"
-  assume_role_policy = jsonencode({
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Federated = aws_iam_openid_connect_provider.github.arn
-      }
-      Action = "sts:AssumeRoleWithWebIdentity"
-      Condition = {
-        StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:h-vance/aws-landing-zone-terraform:*"
-        }
-      }
-    }]
-  })
+  name               = "github-actions-role"
+  assume_role_policy = data.aws_iam_policy_document.github_actions_assume.json
 }
 
-resource "aws_iam_role_policy_attachment" "github_actions_admin" {
+# Read-only by default. CI in this repo runs fmt, validate, and lint, none of
+# which need write access. An earlier version attached AdministratorAccess,
+# which handed full control of the account to anything that could satisfy the
+# trust policy.
+resource "aws_iam_role_policy_attachment" "github_actions_readonly" {
   role       = aws_iam_role.github_actions.name
-  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
-}
-
-# --- VPC Module ---
-module "vpc" {
-  source = "./modules/vpc"
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 }

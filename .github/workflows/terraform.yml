@@ -1,5 +1,9 @@
 name: Terraform Lint
 
+# Runs without AWS credentials. Everything here is static: no plan, no apply,
+# so a pull request from a fork cannot reach the account. The apply path is
+# manual and documented in the README.
+
 on:
   push:
     branches: [main]
@@ -21,12 +25,48 @@ jobs:
       - name: Terraform Format
         run: terraform fmt -check -recursive
 
+      - name: Terraform Validate (root)
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
+      - name: Terraform Validate (modules)
+        run: |
+          # Each module is validated in isolation so a break is attributed to
+          # the module rather than surfacing as a confusing root error.
+          # log-archive is skipped: it declares configuration_aliases and can
+          # only be validated with providers passed from the root, which the
+          # step above already covers.
+          failed=0
+          for dir in modules/*/; do
+            name=$(basename "$dir")
+            if [ "$name" = "log-archive" ]; then
+              echo "skip $name (requires provider aliases from root)"
+              continue
+            fi
+            echo "::group::validate $name"
+            if ! (cd "$dir" && terraform init -backend=false -input=false >/dev/null && terraform validate); then
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $failed
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: TFLint
+        run: |
+          tflint --init
+          tflint --recursive --minimum-failure-severity=error
+
       - name: Static Analysis (Checkov)
         uses: bridgecrewio/checkov-action@master
         with:
           directory: .
           framework: terraform
           quiet: true
+          # Advisory. terraform validate and tflint above are the hard gates.
           soft_fail: true
 
       - name: Vulnerability Scan (Trivy)
@@ -37,4 +77,3 @@ jobs:
           format: table
           exit-code: 0
           severity: CRITICAL,HIGH
-

@@ -11,5 +11,14 @@ _override.tf.json
 .terraformrc
 terraform.rc
 
+# Real variable values, including member account root emails and the admin
+# CIDR. Commit terraform.tfvars.example instead.
+terraform.tfvars
+*.auto.tfvars
+*.tfplan
+
 # MacOS
 .DS_Store
+
+# Lock files belong to root modules. Child modules inherit the root lock.
+modules/*/.terraform.lock.hcl

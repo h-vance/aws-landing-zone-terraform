@@ -1,0 +1,41 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+#
+# See README, "Two-phase bootstrap": the two account IDs stay empty on the
+# first apply and are filled in from the outputs afterwards.
+
+# --- Required ---
+
+# Root emails for the member accounts. Each must be globally unique across all
+# of AWS and cannot be reused for 90 days after an account closes. A plus
+# address on a mailbox you control works well.
+log_archive_account_email = "you+log-archive@example.com"
+workload_account_email    = "you+workload@example.com"
+
+# Globally unique bucket name for the organization CloudTrail archive.
+log_archive_bucket_name = "yourname-org-cloudtrail-archive"
+
+# CIDR allowed to reach the workload ALB. Must not be 0.0.0.0/0.
+admin_cidr = "203.0.113.4/32"
+
+# --- Phase 2 only ---
+#
+# Leave these empty for the first apply. After it completes, run
+# `terraform output` and paste the values here, then apply again.
+
+log_archive_account_id = ""
+workload_account_id    = ""
+
+# --- Optional ---
+
+home_region     = "us-east-2"
+allowed_regions = ["us-east-1", "us-east-2"]
+
+# Days before CloudTrail logs expire. Keeps storage cost negligible.
+log_retention_days = 30
+
+# The workload ASG defaults to zero running instances so an apply costs
+# nothing. Raise these only when you want real capacity, and remember the
+# deny-expensive-resources SCP caps the instance type.
+workload_asg_min_size         = 0
+workload_asg_desired_capacity = 0
+workload_asg_max_size         = 2
